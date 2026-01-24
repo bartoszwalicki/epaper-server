@@ -1,0 +1,17 @@
+#!/sbin/openrc-run
+
+name="E-Paper Server"
+description="E-Paper Image Server"
+
+command="/usr/bin/gunicorn"
+command_args="-w 4 -b 0.0.0.0:5001 server:app"
+command_user="epaper:epaper"
+pidfile="/run/${RC_SVCNAME}.pid"
+command_background="yes"
+
+directory="/opt/epaper-server"
+
+depend() {
+    need net
+    after firewall
+}

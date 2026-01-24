@@ -1,0 +1,7 @@
+services:
+  epaper-server:
+    build: .
+    container_name: epaper-server
+    ports:
+      - "5001:5001"
+    restart: always
