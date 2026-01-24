@@ -84,6 +84,9 @@ def process_image(image_stream):
     
     img = img.resize((TARGET_WIDTH, h_size), Image.Resampling.LANCZOS)
     
+    # Convert to grayscale to ensure correct mode before cropping/pasting
+    img = img.convert("L")
+    
     # 2. Central cropping to 300px height
     # If height > 300, crop center.
     # If height < 300, pad with white (or black) to reach 300?
