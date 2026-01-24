@@ -67,75 +67,65 @@ def fetch_image_bytes(asset_id, original_path=None):
         print(f"Error downloading image: {e}")
         return None
 
-def process_image(image_stream):
+def process_image_debug(image_stream):
     """
-    Resizes, crops, dithers, and packs the image.
+    DEBUG VERSION: Resizes and crops, returns PIL Image (not packed binary).
     """
     try:
         img = Image.open(image_stream)
+        # Apply EXIF orientation (fixes rotated photos from phones/cameras)
+        from PIL import ImageOps
+        img = ImageOps.exif_transpose(img)
     except IOError:
         print("Error opening image")
         return None
 
-    # 1. Resize to width 400px
-    # Calculate new height to maintain aspect ratio
-    w_percent = (TARGET_WIDTH / float(img.size[0]))
-    h_size = int((float(img.size[1]) * float(w_percent)))
+    # 1. Smart resize to cover the target area (400x300)
+    # Calculate aspect ratios
+    target_ratio = TARGET_WIDTH / TARGET_HEIGHT  # 400/300 = 1.333
+    img_ratio = img.size[0] / img.size[1]
     
-    img = img.resize((TARGET_WIDTH, h_size), Image.Resampling.LANCZOS)
+    # Resize so image covers the entire target area
+    # (some parts may be cropped)
+    if img_ratio > target_ratio:
+        # Image is wider than target - resize by height
+        new_height = TARGET_HEIGHT
+        new_width = int(img.size[0] * (TARGET_HEIGHT / img.size[1]))
+    else:
+        # Image is taller or same ratio - resize by width
+        new_width = TARGET_WIDTH
+        new_height = int(img.size[1] * (TARGET_WIDTH / img.size[0]))
     
-    # Convert to grayscale to ensure correct mode before cropping/pasting
+    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    # Convert to grayscale
     img = img.convert("L")
     
-    # 2. Central cropping to 300px height
-    # If height > 300, crop center.
-    # If height < 300, pad with white (or black) to reach 300?
-    # Requirements: "Then central part of image is taken with 300px height window"
+    # 2. Crop center to exact target size
+    # Calculate crop box
+    left = (new_width - TARGET_WIDTH) // 2
+    top = (new_height - TARGET_HEIGHT) // 2
+    right = left + TARGET_WIDTH
+    bottom = top + TARGET_HEIGHT
     
-    new_img = Image.new("L", (TARGET_WIDTH, TARGET_HEIGHT), 255) # White background
+    img = img.crop((left, top, right, bottom))
     
-    if h_size > TARGET_HEIGHT:
-        # Crop
-        top = (h_size - TARGET_HEIGHT) // 2
-        bottom = top + TARGET_HEIGHT
-        img = img.crop((0, top, TARGET_WIDTH, bottom))
-        new_img.paste(img, (0, 0))
-    else:
-        # Center vertically
-        top = (TARGET_HEIGHT - h_size) // 2
-        new_img.paste(img, (0, top))
-        
-    img = new_img
-
     # 3. Convert to black & white with dithering
-    img = img.convert("1") # Default dithering is Floyd-Steinberg
+    img = img.convert("1")  # Floyd-Steinberg dithering
     
-    # 4. Pack bits
-    # 400x300 = 120,000 pixels. / 8 = 15,000 bytes.
-    # Row-major, Top-to-Bottom, MSB First.
-    
+    # 4. Pack bits for ESP32
+    # 400x300 = 120,000 pixels / 8 = 15,000 bytes
+    # Row-major, Top-to-Bottom, MSB First
     pixels = img.load()
     packed_bytes = bytearray()
     
     for y in range(TARGET_HEIGHT):
         current_byte = 0
         for x in range(TARGET_WIDTH):
-            # 0=Black, 1=White in PIL binary
-            # E-paper usually uses: 0=Black, 1=White.
-            # MSB first
-            
             pixel = pixels[x, y]
-            # Pixel is either 0 or 255 (if accessed as value) or 0/1 depending on PIL version/mode inner workings.
-            # In '1' mode: 0 is black, 255 is white usually when mapped to L, but raw values might be 0/1.
-            # Let's handle both.
             bit = 1 if pixel > 0 else 0
             
-            # Pack MSB first: 
-            # x=0 -> bit 7
-            # x=1 -> bit 6
-            # ...
-            # x=7 -> bit 0
-            
+            # Pack MSB first
             bit_pos = 7 - (x % 8)
             if bit:
                 current_byte |= (1 << bit_pos)
@@ -143,10 +133,7 @@ def process_image(image_stream):
             if (x % 8) == 7:
                 packed_bytes.append(current_byte)
                 current_byte = 0
-                
-        # If width is not multiple of 8, we might need to handle the last byte?
-        # 400 is divisible by 8 (400/8 = 50). So we are good.
-        
+    
     return bytes(packed_bytes)
 
 @app.route('/get_image', methods=['POST'])
@@ -157,7 +144,6 @@ def get_image():
         return "Failed to fetch metadata", 500
         
     asset_id = metadata.get('id')
-    # original_path = metadata.get('originalPath') # Not used since we use API download
     
     if not asset_id:
         return "Invalid metadata", 500
@@ -168,11 +154,11 @@ def get_image():
         return "Failed to download image", 500
         
     # 3. Process image
-    raw_data = process_image(image_stream)
+    raw_data = process_image_debug(image_stream)
     if not raw_data:
         return "Failed to process image", 500
         
-    # 4. Return raw bytes
+    # 4. Return raw binary bytes
     response = make_response(raw_data)
     response.headers.set('Content-Type', 'application/octet-stream')
     response.headers.set('Content-Length', str(len(raw_data)))
