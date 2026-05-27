@@ -32,7 +32,13 @@ def fetch_random_image_metadata():
     
     payload = {
         "size": 1,
-        "type": "IMAGE"
+        "type": "IMAGE",
+        "personIds": [
+            "80fe403f-e8f3-4e97-921b-2114c68883b0",
+            "a117a2df-6401-4ea3-8d3b-50eb09cbf07d",
+            "fe6f80fd-6841-450c-a24e-d89cddad3691",
+            "6cfabf47-38ad-4cee-91c7-7afbd99ad5f6",
+        ],
     }
     
     try:
