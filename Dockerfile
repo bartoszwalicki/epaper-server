@@ -16,6 +16,8 @@ COPY server.py .
 # Make port 5001 available to the world outside this container
 EXPOSE 5001
 
+ENV PYTHONUNBUFFERED=1
+
 # Run the application with Gunicorn
 # 4 workers is a good start for general purpose
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5001", "server:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5001", "--capture-output", "--log-level", "debug", "--error-logfile", "-", "server:app"]

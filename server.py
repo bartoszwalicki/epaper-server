@@ -1,5 +1,6 @@
 import os
 import io
+import random
 import requests
 from flask import Flask, make_response
 from PIL import Image
@@ -12,6 +13,13 @@ API_KEY = "MK9SLexmExAZ3o71QQ5VXB3qZNg7nbWxOihZDV3x2E"
 
 TARGET_WIDTH = 400
 TARGET_HEIGHT = 300
+
+PERSON_IDS = [
+    "80fe403f-e8f3-4e97-921b-2114c68883b0",
+    "a117a2df-6401-4ea3-8d3b-50eb09cbf07d",
+    "fe6f80fd-6841-450c-a24e-d89cddad3691",
+    "6cfabf47-38ad-4cee-91c7-7afbd99ad5f6",
+]
 
 def fetch_random_image_metadata():
     """Fetches metadata for a random image from Immich."""
@@ -33,12 +41,7 @@ def fetch_random_image_metadata():
     payload = {
         "size": 1,
         "type": "IMAGE",
-        "personIds": [
-            "80fe403f-e8f3-4e97-921b-2114c68883b0",
-            "a117a2df-6401-4ea3-8d3b-50eb09cbf07d",
-            "fe6f80fd-6841-450c-a24e-d89cddad3691",
-            "6cfabf47-38ad-4cee-91c7-7afbd99ad5f6",
-        ],
+        "personIds": [random.choice(PERSON_IDS)],
     }
     
     try:
