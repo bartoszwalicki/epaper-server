@@ -122,13 +122,13 @@ def process_image_debug(image_stream, weather_data=None):
     
     img = img.crop((left, top, right, bottom))
 
-    # Draw weather overlay on grayscale image before dithering so the
-    # subsequent Floyd-Steinberg pass treats the widget uniformly with the photo.
-    if weather_data:
-        draw_weather_overlay(img, weather_data)
-
     # 3. Convert to black & white with dithering
     img = img.convert("1")  # Floyd-Steinberg dithering
+
+    # Apply weather overlay AFTER dithering so the widget stays crisp
+    # (dithering noise from the photo can't bleed into the box).
+    if weather_data:
+        draw_weather_overlay(img, weather_data)
     
     # 4. Pack bits for ESP32
     # 400x300 = 120,000 pixels / 8 = 15,000 bytes

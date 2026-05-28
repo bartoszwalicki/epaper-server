@@ -5,15 +5,23 @@ _FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 _TEXT_FONT_PATH = os.path.join(_FONT_DIR, "DejaVuSans.ttf")
 _ICON_FONT_PATH = os.path.join(_FONT_DIR, "weathericons-regular-webfont.ttf")
 
-# Box covers lower-right corner with a 4 px margin from image edges.
-_BOX = (265, 235, 395, 295)            # visible border rectangle
-_BLEED = (263, 233, 397, 297)          # fat white pre-fill to block dither bleed
+# Vertical box anchored to the lower-right corner with a 4 px margin
+# from the image edges. Two forecast blocks stacked vertically.
+_BOX_W = 60
+_BOX_H = 130
+_BOX_LEFT = 400 - 4 - _BOX_W       # 336
+_BOX_TOP = 300 - 4 - _BOX_H        # 166
+_BOX_RIGHT = _BOX_LEFT + _BOX_W    # 396
+_BOX_BOTTOM = _BOX_TOP + _BOX_H    # 296
+
 _BORDER_W = 2
-_ROW1_Y = 238
-_ROW2_Y = 266
-_ICON_X = 269
-_LABEL_X = 297
-_TEMP_RIGHT_X = 389                    # right edge for right-aligned temperature
+_BLOCK_H = (_BOX_H - _BORDER_W) // 2     # 64
+_SEPARATOR_Y = _BOX_TOP + _BLOCK_H        # 230
+
+# Within each block: icon on top, label, temperature.
+_ICON_Y_OFFSET = 4
+_LABEL_Y_OFFSET = 30
+_TEMP_Y_OFFSET = 44
 
 
 def _load_font(path, size):
@@ -24,29 +32,41 @@ def _load_font(path, size):
 
 
 TEXT_FONT = _load_font(_TEXT_FONT_PATH, 12)
-ICON_FONT = _load_font(_ICON_FONT_PATH, 22)
+ICON_FONT = _load_font(_ICON_FONT_PATH, 26)
 
 
-def draw_weather_overlay(img_L, weather_data):
-    """Draw the two-row weather widget in the lower-right corner of img_L.
+def _draw_centered(draw, text, font, cx, y):
+    w = draw.textlength(text, font=font)
+    draw.text((cx - w / 2, y), text, font=font, fill=0)
 
-    Mutates img_L in place. img_L must be a PIL Image in mode 'L' (grayscale).
-    weather_data is the list returned by weather.fetch_weather().
+
+def draw_weather_overlay(img_1bit, weather_data):
+    """Paste the vertical weather widget onto the lower-right of a 1-bit image.
+
+    The widget is composed on a grayscale canvas and converted to 1-bit
+    with threshold (no Floyd-Steinberg), so the photo's dithering does
+    not bleed into the widget and the glyphs/text stay crisp.
+
+    img_1bit: PIL.Image in mode '1' (the dithered final frame).
+    weather_data: list of two dicts returned by weather.fetch_weather().
     """
-    draw = ImageDraw.Draw(img_L)
+    widget = Image.new("L", (_BOX_W, _BOX_H), 255)
+    draw = ImageDraw.Draw(widget)
 
-    # Pre-fill a slightly larger white area so Floyd-Steinberg error diffusion
-    # from neighboring photo pixels can't bleed into the visible border.
-    draw.rectangle(_BLEED, fill=255)
-    draw.rectangle(_BOX, outline=0, width=_BORDER_W, fill=255)
+    draw.rectangle((0, 0, _BOX_W - 1, _BOX_H - 1), outline=0, width=_BORDER_W)
+    sep_y_local = _BLOCK_H
+    draw.line((_BORDER_W, sep_y_local, _BOX_W - 1 - _BORDER_W, sep_y_local),
+              fill=0, width=1)
 
-    for row_y, entry in zip((_ROW1_Y, _ROW2_Y), weather_data):
+    cx = _BOX_W // 2
+    for i, entry in enumerate(weather_data):
+        block_top = i * _BLOCK_H
         glyph = entry.get("glyph", "")
         label = f"+{entry['offset_hours']}h"
         temp = f"{round(entry['temp']):d}°"
+        _draw_centered(draw, glyph, ICON_FONT, cx, block_top + _ICON_Y_OFFSET)
+        _draw_centered(draw, label, TEXT_FONT, cx, block_top + _LABEL_Y_OFFSET)
+        _draw_centered(draw, temp, TEXT_FONT, cx, block_top + _TEMP_Y_OFFSET)
 
-        draw.text((_ICON_X, row_y - 4), glyph, font=ICON_FONT, fill=0)
-        draw.text((_LABEL_X, row_y + 2), label, font=TEXT_FONT, fill=0)
-
-        temp_w = draw.textlength(temp, font=TEXT_FONT)
-        draw.text((_TEMP_RIGHT_X - temp_w, row_y + 2), temp, font=TEXT_FONT, fill=0)
+    widget_1 = widget.convert("1", dither=Image.Dither.NONE)
+    img_1bit.paste(widget_1, (_BOX_LEFT, _BOX_TOP))
