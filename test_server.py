@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 import io
 from PIL import Image
 import server
@@ -9,9 +9,10 @@ class TestImageServer(unittest.TestCase):
         self.app = server.app.test_client()
         self.app.testing = True
 
+    @patch('server.fetch_weather', return_value=None)
     @patch('server.requests.post')
     @patch('server.requests.get')
-    def test_get_image_success(self, mock_get, mock_post):
+    def test_get_image_success(self, mock_get, mock_post, mock_weather):
         # Mock Metadata Response
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = [{
@@ -47,7 +48,7 @@ class TestImageServer(unittest.TestCase):
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-            json={'size': 1, 'type': 'IMAGE'},
+            json={'size': 1, 'type': 'IMAGE', 'personIds': ANY},
             params={'size': 1}
         )
         

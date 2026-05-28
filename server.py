@@ -5,6 +5,9 @@ import requests
 from flask import Flask, make_response
 from PIL import Image
 
+from weather import fetch_weather
+from overlay import draw_weather_overlay
+
 app = Flask(__name__)
 
 # Configuration
@@ -76,7 +79,7 @@ def fetch_image_bytes(asset_id, original_path=None):
         print(f"Error downloading image: {e}")
         return None
 
-def process_image_debug(image_stream):
+def process_image_debug(image_stream, weather_data=None):
     """
     DEBUG VERSION: Resizes and crops, returns PIL Image (not packed binary).
     """
@@ -118,7 +121,12 @@ def process_image_debug(image_stream):
     bottom = top + TARGET_HEIGHT
     
     img = img.crop((left, top, right, bottom))
-    
+
+    # Draw weather overlay on grayscale image before dithering so the
+    # subsequent Floyd-Steinberg pass treats the widget uniformly with the photo.
+    if weather_data:
+        draw_weather_overlay(img, weather_data)
+
     # 3. Convert to black & white with dithering
     img = img.convert("1")  # Floyd-Steinberg dithering
     
@@ -161,9 +169,12 @@ def get_image():
     image_stream = fetch_image_bytes(asset_id)
     if not image_stream:
         return "Failed to download image", 500
-        
-    # 3. Process image
-    raw_data = process_image_debug(image_stream)
+
+    # 3. Fetch weather forecast (None on failure → overlay is skipped)
+    weather_data = fetch_weather()
+
+    # 4. Process image
+    raw_data = process_image_debug(image_stream, weather_data=weather_data)
     if not raw_data:
         return "Failed to process image", 500
         
