@@ -20,8 +20,8 @@ _SEPARATOR_Y = _BOX_TOP + _BLOCK_H        # 230
 
 # Within each block: icon on top, label, temperature.
 _ICON_Y_OFFSET = 4
-_LABEL_Y_OFFSET = 30
-_TEMP_Y_OFFSET = 44
+_LABEL_Y_OFFSET = 31
+_TEMP_Y_OFFSET = 45
 
 
 def _load_font(path, size):
