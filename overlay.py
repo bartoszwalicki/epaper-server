@@ -18,12 +18,9 @@ _BORDER_W = 2
 _BLOCK_H = (_BOX_H - _BORDER_W) // 2     # 64
 _SEPARATOR_Y = _BOX_TOP + _BLOCK_H        # 230
 
-# Within each block: icon top-anchored 1 px below the upper line (the top
-# border for the first block, the separator for the second), then label and
-# temperature at fixed offsets below. Top-anchoring means tall glyphs (rain,
-# snow, thunder) extend downward into the free space rather than leaving a
-# wide gap above them.
-_ICON_TOP_GAP = 1
+# Within each block: the icon is vertically centred in the box between the
+# upper line (the top border for the first block, the separator for the rest)
+# and the label, then the label and temperature sit at fixed offsets below.
 _LABEL_Y_OFFSET = 31
 _TEMP_Y_OFFSET = 45
 
@@ -44,18 +41,21 @@ def _draw_centered(draw, text, font, cx, y):
     draw.text((cx - w / 2, y), text, font=font, fill=0)
 
 
-def _draw_icon(draw, glyph, font, cx, top_y):
-    """Draw a centred icon glyph with its visible top edge at ``top_y``.
+def _draw_icon(draw, glyph, font, cx, box_top, box_bottom):
+    """Draw an icon glyph centred horizontally on ``cx`` and vertically within
+    the box ``[box_top, box_bottom]``.
 
-    Glyphs in the Weather Icons font have varying internal top bearing, so we
-    subtract the glyph's bbox top to align every icon's visible top to the
-    same line regardless of the glyph's height.
+    Glyphs in the Weather Icons font have varying internal bearings and
+    heights, so we measure the glyph's visible bbox and centre that visible
+    extent in the box (rather than the font's nominal line box).
     """
     if not glyph:
         return
     w = draw.textlength(glyph, font=font)
-    top = font.getbbox(glyph)[1]
-    draw.text((cx - w / 2, top_y - top), glyph, font=font, fill=0)
+    left, top, right, bottom = font.getbbox(glyph)
+    glyph_h = bottom - top
+    visible_top = box_top + (box_bottom - box_top - glyph_h) / 2
+    draw.text((cx - w / 2, round(visible_top - top)), glyph, font=font, fill=0)
 
 
 def draw_weather_overlay(img_1bit, weather_data):
@@ -79,14 +79,14 @@ def draw_weather_overlay(img_1bit, weather_data):
     cx = _BOX_W // 2
     for i, entry in enumerate(weather_data):
         block_top = i * _BLOCK_H
-        # Upper line is the 2 px top border for the first block, the 1 px
-        # separator for the rest. Place the icon 1 px below it.
-        upper_line_bottom = _BORDER_W if i == 0 else block_top + 1
-        icon_top = upper_line_bottom + _ICON_TOP_GAP
+        # The icon box spans from the upper line (2 px top border for the
+        # first block, 1 px separator for the rest) down to the label.
+        box_top = _BORDER_W if i == 0 else block_top + 1
+        box_bottom = block_top + _LABEL_Y_OFFSET
         glyph = entry.get("glyph", "")
         label = f"+{entry['offset_hours']}h"
         temp = f"{round(entry['temp']):d}°"
-        _draw_icon(draw, glyph, ICON_FONT, cx, icon_top)
+        _draw_icon(draw, glyph, ICON_FONT, cx, box_top, box_bottom)
         _draw_centered(draw, label, TEXT_FONT, cx, block_top + _LABEL_Y_OFFSET)
         _draw_centered(draw, temp, TEXT_FONT, cx, block_top + _TEMP_Y_OFFSET)
 
