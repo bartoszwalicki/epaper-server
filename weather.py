@@ -42,7 +42,7 @@ FALLBACK_GLYPH = ""  # cloudy
 
 
 def fetch_weather():
-    """Fetch next two hourly forecasts for the configured location.
+    """Fetch the +2h and +5h hourly forecasts for the configured location.
 
     Returns a list of two dicts (offset_hours, temp, code, glyph) on success,
     or None on any failure so the caller can skip the overlay.
@@ -51,7 +51,7 @@ def fetch_weather():
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
         "hourly": "temperature_2m,weather_code",
-        "forecast_hours": 3,
+        "forecast_hours": 6,
         "timezone": "Europe/Warsaw",
     }
     try:
@@ -60,7 +60,8 @@ def fetch_weather():
         hourly = response.json()["hourly"]
         temps = hourly["temperature_2m"]
         codes = hourly["weather_code"]
-        # forecast_hours=3 yields [current, +1h, +2h] in order.
+        # forecast_hours=6 yields [current, +1h, +2h, +3h, +4h, +5h] in order,
+        # so the +2h and +5h forecasts are at indices 2 and 5.
         return [
             {
                 "offset_hours": offset,
@@ -68,7 +69,7 @@ def fetch_weather():
                 "code": codes[idx],
                 "glyph": WMO_GLYPH.get(codes[idx], FALLBACK_GLYPH),
             }
-            for offset, idx in ((1, 1), (2, 2))
+            for offset, idx in ((2, 2), (5, 5))
         ]
     except Exception as e:
         print(f"Error fetching weather: {e}")

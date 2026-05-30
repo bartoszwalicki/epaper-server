@@ -18,8 +18,12 @@ _BORDER_W = 2
 _BLOCK_H = (_BOX_H - _BORDER_W) // 2     # 64
 _SEPARATOR_Y = _BOX_TOP + _BLOCK_H        # 230
 
-# Within each block: icon on top, label, temperature.
-_ICON_Y_OFFSET = 4
+# Within each block: icon top-anchored 1 px below the upper line (the top
+# border for the first block, the separator for the second), then label and
+# temperature at fixed offsets below. Top-anchoring means tall glyphs (rain,
+# snow, thunder) extend downward into the free space rather than leaving a
+# wide gap above them.
+_ICON_TOP_GAP = 1
 _LABEL_Y_OFFSET = 31
 _TEMP_Y_OFFSET = 45
 
@@ -38,6 +42,20 @@ ICON_FONT = _load_font(_ICON_FONT_PATH, 26)
 def _draw_centered(draw, text, font, cx, y):
     w = draw.textlength(text, font=font)
     draw.text((cx - w / 2, y), text, font=font, fill=0)
+
+
+def _draw_icon(draw, glyph, font, cx, top_y):
+    """Draw a centred icon glyph with its visible top edge at ``top_y``.
+
+    Glyphs in the Weather Icons font have varying internal top bearing, so we
+    subtract the glyph's bbox top to align every icon's visible top to the
+    same line regardless of the glyph's height.
+    """
+    if not glyph:
+        return
+    w = draw.textlength(glyph, font=font)
+    top = font.getbbox(glyph)[1]
+    draw.text((cx - w / 2, top_y - top), glyph, font=font, fill=0)
 
 
 def draw_weather_overlay(img_1bit, weather_data):
@@ -61,10 +79,14 @@ def draw_weather_overlay(img_1bit, weather_data):
     cx = _BOX_W // 2
     for i, entry in enumerate(weather_data):
         block_top = i * _BLOCK_H
+        # Upper line is the 2 px top border for the first block, the 1 px
+        # separator for the rest. Place the icon 1 px below it.
+        upper_line_bottom = _BORDER_W if i == 0 else block_top + 1
+        icon_top = upper_line_bottom + _ICON_TOP_GAP
         glyph = entry.get("glyph", "")
         label = f"+{entry['offset_hours']}h"
         temp = f"{round(entry['temp']):d}°"
-        _draw_centered(draw, glyph, ICON_FONT, cx, block_top + _ICON_Y_OFFSET)
+        _draw_icon(draw, glyph, ICON_FONT, cx, icon_top)
         _draw_centered(draw, label, TEXT_FONT, cx, block_top + _LABEL_Y_OFFSET)
         _draw_centered(draw, temp, TEXT_FONT, cx, block_top + _TEMP_Y_OFFSET)
 
