@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
-COPY server.py weather.py overlay.py ./
+COPY server.py weather.py overlay.py weather_page.py ./
 COPY fonts/ ./fonts/
 
 # Make port 5001 available to the world outside this container

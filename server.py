@@ -1,12 +1,16 @@
 import os
 import io
 import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import requests
 from flask import Flask, make_response
 from PIL import Image
 
-from weather import fetch_weather
+from weather import TIMEZONE, fetch_weather, fetch_weather_2day
 from overlay import draw_weather_overlay
+from weather_page import render_weather_page
 
 app = Flask(__name__)
 
@@ -23,6 +27,31 @@ PERSON_IDS = [
     "fe6f80fd-6841-450c-a24e-d89cddad3691",
     "6cfabf47-38ad-4cee-91c7-7afbd99ad5f6",
 ]
+
+
+def pack_1bit(img):
+    """Pack a mode-'1' PIL image into the SSD1683 frame buffer format:
+    row-major, top-to-bottom, MSB first, 1 = white. 400x300 -> 15,000 bytes.
+    """
+    width, height = img.size
+    pixels = img.load()
+    packed_bytes = bytearray()
+
+    for y in range(height):
+        current_byte = 0
+        for x in range(width):
+            bit = 1 if pixels[x, y] > 0 else 0
+            bit_pos = 7 - (x % 8)
+            if bit:
+                current_byte |= (1 << bit_pos)
+            if (x % 8) == 7:
+                packed_bytes.append(current_byte)
+                current_byte = 0
+        # Flush a trailing partial byte if the row width isn't a multiple of 8.
+        if width % 8:
+            packed_bytes.append(current_byte)
+
+    return bytes(packed_bytes)
 
 def fetch_random_image_metadata():
     """Fetches metadata for a random image from Immich."""
@@ -130,28 +159,8 @@ def process_image_debug(image_stream, weather_data=None):
     if weather_data:
         draw_weather_overlay(img, weather_data)
     
-    # 4. Pack bits for ESP32
-    # 400x300 = 120,000 pixels / 8 = 15,000 bytes
-    # Row-major, Top-to-Bottom, MSB First
-    pixels = img.load()
-    packed_bytes = bytearray()
-    
-    for y in range(TARGET_HEIGHT):
-        current_byte = 0
-        for x in range(TARGET_WIDTH):
-            pixel = pixels[x, y]
-            bit = 1 if pixel > 0 else 0
-            
-            # Pack MSB first
-            bit_pos = 7 - (x % 8)
-            if bit:
-                current_byte |= (1 << bit_pos)
-            
-            if (x % 8) == 7:
-                packed_bytes.append(current_byte)
-                current_byte = 0
-    
-    return bytes(packed_bytes)
+    # 4. Pack bits for ESP32 (400x300 -> 15,000 bytes)
+    return pack_1bit(img)
 
 @app.route('/get_image', methods=['POST'])
 def get_image():
@@ -179,6 +188,25 @@ def get_image():
         return "Failed to process image", 500
         
     # 4. Return raw binary bytes
+    response = make_response(raw_data)
+    response.headers.set('Content-Type', 'application/octet-stream')
+    response.headers.set('Content-Length', str(len(raw_data)))
+    return response
+
+@app.route('/get_weather_image', methods=['POST'])
+def get_weather_image():
+    # Full-page 2-day forecast. Weather fetch failing is non-fatal: the page
+    # still renders with the (locally known) date/time and an "unavailable" note.
+    # The device requires exactly 15000 bytes, so on any unexpected render error
+    # we fall back to the unavailable page rather than returning a 500.
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    try:
+        img = render_weather_page(fetch_weather_2day(), now)
+    except Exception as e:
+        print(f"Error rendering weather page: {e}")
+        img = render_weather_page(None, now)
+    raw_data = pack_1bit(img)
+
     response = make_response(raw_data)
     response.headers.set('Content-Type', 'application/octet-stream')
     response.headers.set('Content-Length', str(len(raw_data)))
