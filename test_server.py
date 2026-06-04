@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock, ANY
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from PIL import Image
 import server
 import weather
@@ -86,6 +86,10 @@ def _fake_slots(n=16, start_hour=15):
     return slots
 
 
+def _fake_forecast(**kw):
+    return {"slots": _fake_slots(**kw), "offset_seconds": 7200}
+
+
 class TestWeatherImageEndpoint(unittest.TestCase):
     def setUp(self):
         self.app = server.app.test_client()
@@ -97,7 +101,7 @@ class TestWeatherImageEndpoint(unittest.TestCase):
                          'application/octet-stream')
         self.assertEqual(len(response.data), 15000)
 
-    @patch('server.fetch_weather_2day', return_value=_fake_slots())
+    @patch('server.fetch_weather_2day', return_value=_fake_forecast())
     def test_weather_image_with_slots(self, _mock):
         self._assert_bitmap(self.app.post('/get_weather_image'))
 
@@ -106,11 +110,33 @@ class TestWeatherImageEndpoint(unittest.TestCase):
         # Weather failure must still return a valid 15000-byte page.
         self._assert_bitmap(self.app.post('/get_weather_image'))
 
-    @patch('server.fetch_weather_2day', return_value=[{"hour": 0}])
+    @patch('server.fetch_weather_2day',
+           return_value={"slots": [{"hour": 0}], "offset_seconds": 0})
     def test_weather_image_render_error_falls_back(self, _mock):
         # A malformed slot makes the grid render raise; the endpoint must
         # degrade to the unavailable page rather than 500.
         self._assert_bitmap(self.app.post('/get_weather_image'))
+
+    def test_weather_image_no_tzdata(self):
+        # Simulate a server with no timezone database (e.g. Alpine without
+        # tzdata): ZoneInfo raises, but the endpoint must still return 15000
+        # bytes, not a 500.
+        with patch('server.fetch_weather_2day', return_value=None), \
+             patch('weather.ZoneInfo', side_effect=Exception("no tz db")):
+            self._assert_bitmap(self.app.post('/get_weather_image'))
+
+
+class TestLocalNow(unittest.TestCase):
+    def test_offset_path_is_dst_aware_and_needs_no_tzdb(self):
+        # +2h (CEST) offset from the API; must not touch the tz database.
+        with patch('weather.ZoneInfo', side_effect=Exception("no tz db")):
+            now = weather.local_now(7200)
+        self.assertEqual(now.utcoffset(), timedelta(hours=2))
+
+    def test_fallback_never_raises_without_tzdb(self):
+        with patch('weather.ZoneInfo', side_effect=Exception("no tz db")):
+            now = weather.local_now()  # no offset -> tz db fails -> fixed offset
+        self.assertIsNotNone(now.tzinfo)
 
 
 class TestFetchWeather2Day(unittest.TestCase):
@@ -121,21 +147,26 @@ class TestFetchWeather2Day(unittest.TestCase):
         temps[15] = None  # 15:00 has a missing temperature
         codes = [0 for _ in range(hours)]
         resp = MagicMock()
-        resp.json.return_value = {"hourly": {
-            "time": times, "temperature_2m": temps, "weather_code": codes,
-        }}
+        resp.json.return_value = {
+            "utc_offset_seconds": 7200,
+            "hourly": {
+                "time": times, "temperature_2m": temps, "weather_code": codes,
+            },
+        }
         return resp
 
     @patch('weather.datetime')
     @patch('weather.requests.get')
     def test_samples_3h_boundaries_after_now(self, mock_get, mock_dt):
         mock_get.return_value = self._mock_response()
-        # now = 14:32 -> first boundary is 15:00
-        mock_dt.now.return_value = datetime(2026, 6, 4, 14, 32)
+        # 12:32 UTC + 2h offset = 14:32 local -> first boundary is 15:00.
+        mock_dt.now.return_value = datetime(2026, 6, 4, 12, 32, tzinfo=timezone.utc)
         mock_dt.fromisoformat.side_effect = datetime.fromisoformat
 
-        slots = weather.fetch_weather_2day()
+        result = weather.fetch_weather_2day()
+        slots = result["slots"]
 
+        self.assertEqual(result["offset_seconds"], 7200)
         self.assertEqual(len(slots), 16)
         self.assertEqual(slots[0]["dt"], datetime(2026, 6, 4, 15, 0))
         self.assertTrue(all(s["hour"] % 3 == 0 for s in slots))

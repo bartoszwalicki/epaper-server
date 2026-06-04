@@ -1,14 +1,12 @@
 import os
 import io
 import random
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import requests
 from flask import Flask, make_response
 from PIL import Image
 
-from weather import TIMEZONE, fetch_weather, fetch_weather_2day
+from weather import fetch_weather, fetch_weather_2day, local_now
 from overlay import draw_weather_overlay
 from weather_page import render_weather_page
 
@@ -195,16 +193,19 @@ def get_image():
 
 @app.route('/get_weather_image', methods=['POST'])
 def get_weather_image():
-    # Full-page 2-day forecast. Weather fetch failing is non-fatal: the page
-    # still renders with the (locally known) date/time and an "unavailable" note.
-    # The device requires exactly 15000 bytes, so on any unexpected render error
-    # we fall back to the unavailable page rather than returning a 500.
-    now = datetime.now(ZoneInfo(TIMEZONE))
+    # Full-page 2-day forecast. Weather/render failures are non-fatal: the
+    # device requires exactly 15000 bytes, so we always return a valid page
+    # (an "unavailable" one on failure) rather than a 500. Local time comes from
+    # the forecast's DST-aware offset, so no server timezone database is needed.
     try:
-        img = render_weather_page(fetch_weather_2day(), now)
+        data = fetch_weather_2day()
+        if data:
+            img = render_weather_page(data["slots"], local_now(data["offset_seconds"]))
+        else:
+            img = render_weather_page(None, local_now())
     except Exception as e:
         print(f"Error rendering weather page: {e}")
-        img = render_weather_page(None, now)
+        img = render_weather_page(None, local_now())
     raw_data = pack_1bit(img)
 
     response = make_response(raw_data)

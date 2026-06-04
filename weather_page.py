@@ -103,13 +103,13 @@ def render_weather_page(slots, now):
 if __name__ == "__main__":
     # Render a sample using live weather (falls back to the unavailable page)
     # for quick visual inspection.
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+    from weather import fetch_weather_2day, local_now
 
-    from weather import TIMEZONE, fetch_weather_2day
-
-    sample_now = datetime.now(ZoneInfo(TIMEZONE))
-    img = render_weather_page(fetch_weather_2day(), sample_now)
+    data = fetch_weather_2day()
+    if data:
+        img = render_weather_page(data["slots"], local_now(data["offset_seconds"]))
+    else:
+        img = render_weather_page(None, local_now())
     out = "weather_page_sample.png"
     img.save(out)
     print(f"Wrote {out}")

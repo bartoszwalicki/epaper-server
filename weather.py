@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import requests
@@ -7,6 +7,29 @@ WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 LATITUDE = 52.4064
 LONGITUDE = 16.9252
 TIMEZONE = "Europe/Warsaw"
+
+# Used only when the timezone database is unavailable (e.g. a minimal Alpine or
+# slim image without tzdata) AND no API offset is on hand. Europe/Warsaw is +2
+# in summer (CEST); this may be 1h off in winter, but it only affects the rare
+# "weather unavailable" page, never the live forecast (which carries its own
+# DST-aware offset from Open-Meteo).
+FALLBACK_UTC_OFFSET = timedelta(hours=2)
+
+
+def local_now(offset_seconds=None):
+    """Current wall-clock time at the configured location, tz-aware.
+
+    Prefers the DST-aware offset returned by Open-Meteo so the server needs no
+    timezone database. Falls back to the system tz database, then to a fixed
+    offset, so it never raises even on an image without tzdata.
+    """
+    if offset_seconds is not None:
+        return datetime.now(timezone.utc).astimezone(
+            timezone(timedelta(seconds=offset_seconds)))
+    try:
+        return datetime.now(ZoneInfo(TIMEZONE))
+    except Exception:
+        return datetime.now(timezone(FALLBACK_UTC_OFFSET))
 
 # WMO weather code 4677 (Open-Meteo) → Erik Flowers Weather Icons codepoint.
 # See: https://open-meteo.com/en/docs (WMO Weather interpretation codes)
@@ -88,9 +111,11 @@ SLOT_STEP_HOURS = 3
 def fetch_weather_2day():
     """Fetch a rolling 2-day forecast sampled every 3 hours.
 
-    Returns a list of FORECAST_SLOTS dicts (dt, hour, temp, code, glyph) starting
-    at the next 3-hour clock boundary at or after the current local time, or None
-    on any failure so the caller can render a "weather unavailable" page.
+    Returns a dict {"slots", "offset_seconds"} where "slots" is up to
+    FORECAST_SLOTS dicts (dt, hour, temp, code, glyph) starting at the next
+    3-hour clock boundary at or after the current local time, and
+    "offset_seconds" is the location's DST-aware UTC offset. Returns None on any
+    failure so the caller can render a "weather unavailable" page.
     """
     params = {
         "latitude": LATITUDE,
@@ -104,14 +129,17 @@ def fetch_weather_2day():
     try:
         response = requests.get(WEATHER_URL, params=params, timeout=3)
         response.raise_for_status()
-        hourly = response.json()["hourly"]
+        data = response.json()
+        hourly = data["hourly"]
         times = hourly["time"]
         temps = hourly["temperature_2m"]
         codes = hourly["weather_code"]
+        offset_seconds = data.get("utc_offset_seconds", 0)
 
         # Open-Meteo returns naive ISO timestamps already in the requested
-        # timezone, so compare against a naive "now" in the same zone.
-        now_local = datetime.now(ZoneInfo(TIMEZONE)).replace(tzinfo=None)
+        # timezone. Derive a naive "now" in that same zone from the API's
+        # DST-aware offset, so the server needs no local timezone database.
+        now_local = local_now(offset_seconds).replace(tzinfo=None)
 
         # Pick the timestamps that land on a 3-hour clock boundary (00,03,...)
         # at or after now. Selecting by the local wall-clock hour (rather than
@@ -132,7 +160,9 @@ def fetch_weather_2day():
             })
             if len(slots) >= FORECAST_SLOTS:
                 break
-        return slots if slots else None
+        if not slots:
+            return None
+        return {"slots": slots, "offset_seconds": offset_seconds}
     except Exception as e:
         print(f"Error fetching 2-day weather: {e}")
         return None
