@@ -69,7 +69,7 @@ def _draw_day_row(draw, row_top, day_slots, now):
         cx = c * COL_W + COL_W // 2
         temp = slot["temp"]
         temp_str = f"{round(temp):d}°" if temp is not None else "--°"
-        _draw_centered(draw, f"{slot['hour']:02d}h", LABEL_FONT, cx,
+        _draw_centered(draw, f"{slot['hour']:02d}:00", LABEL_FONT, cx,
                        row_top + _HOUR_LABEL_Y)
         _draw_icon(draw, slot["glyph"], PAGE_ICON_FONT, cx,
                    row_top + _ICON_BOX_TOP, row_top + _ICON_BOX_BOTTOM)

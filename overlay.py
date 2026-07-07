@@ -84,7 +84,7 @@ def draw_weather_overlay(img_1bit, weather_data):
         box_top = _BORDER_W if i == 0 else block_top + 1
         box_bottom = block_top + _LABEL_Y_OFFSET
         glyph = entry.get("glyph", "")
-        label = f"{entry['hour']:02d}h"
+        label = f"{entry['hour']:02d}:00"
         temp = f"{round(entry['temp']):d}°"
         _draw_icon(draw, glyph, ICON_FONT, cx, box_top, box_bottom)
         _draw_centered(draw, label, TEXT_FONT, cx, block_top + _LABEL_Y_OFFSET)
