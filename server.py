@@ -1,9 +1,14 @@
 import os
 import io
 import random
+
 import requests
 from flask import Flask, make_response
 from PIL import Image
+
+from weather import fetch_weather, fetch_weather_2day, local_now
+from overlay import draw_weather_overlay
+from weather_page import render_weather_page
 
 app = Flask(__name__)
 
@@ -20,6 +25,31 @@ PERSON_IDS = [
     "fe6f80fd-6841-450c-a24e-d89cddad3691",
     "6cfabf47-38ad-4cee-91c7-7afbd99ad5f6",
 ]
+
+
+def pack_1bit(img):
+    """Pack a mode-'1' PIL image into the SSD1683 frame buffer format:
+    row-major, top-to-bottom, MSB first, 1 = white. 400x300 -> 15,000 bytes.
+    """
+    width, height = img.size
+    pixels = img.load()
+    packed_bytes = bytearray()
+
+    for y in range(height):
+        current_byte = 0
+        for x in range(width):
+            bit = 1 if pixels[x, y] > 0 else 0
+            bit_pos = 7 - (x % 8)
+            if bit:
+                current_byte |= (1 << bit_pos)
+            if (x % 8) == 7:
+                packed_bytes.append(current_byte)
+                current_byte = 0
+        # Flush a trailing partial byte if the row width isn't a multiple of 8.
+        if width % 8:
+            packed_bytes.append(current_byte)
+
+    return bytes(packed_bytes)
 
 def fetch_random_image_metadata():
     """Fetches metadata for a random image from Immich."""
@@ -76,7 +106,7 @@ def fetch_image_bytes(asset_id, original_path=None):
         print(f"Error downloading image: {e}")
         return None
 
-def process_image_debug(image_stream):
+def process_image_debug(image_stream, weather_data=None):
     """
     DEBUG VERSION: Resizes and crops, returns PIL Image (not packed binary).
     """
@@ -118,32 +148,17 @@ def process_image_debug(image_stream):
     bottom = top + TARGET_HEIGHT
     
     img = img.crop((left, top, right, bottom))
-    
+
     # 3. Convert to black & white with dithering
     img = img.convert("1")  # Floyd-Steinberg dithering
+
+    # Apply weather overlay AFTER dithering so the widget stays crisp
+    # (dithering noise from the photo can't bleed into the box).
+    if weather_data:
+        draw_weather_overlay(img, weather_data)
     
-    # 4. Pack bits for ESP32
-    # 400x300 = 120,000 pixels / 8 = 15,000 bytes
-    # Row-major, Top-to-Bottom, MSB First
-    pixels = img.load()
-    packed_bytes = bytearray()
-    
-    for y in range(TARGET_HEIGHT):
-        current_byte = 0
-        for x in range(TARGET_WIDTH):
-            pixel = pixels[x, y]
-            bit = 1 if pixel > 0 else 0
-            
-            # Pack MSB first
-            bit_pos = 7 - (x % 8)
-            if bit:
-                current_byte |= (1 << bit_pos)
-            
-            if (x % 8) == 7:
-                packed_bytes.append(current_byte)
-                current_byte = 0
-    
-    return bytes(packed_bytes)
+    # 4. Pack bits for ESP32 (400x300 -> 15,000 bytes)
+    return pack_1bit(img)
 
 @app.route('/get_image', methods=['POST'])
 def get_image():
@@ -161,13 +176,38 @@ def get_image():
     image_stream = fetch_image_bytes(asset_id)
     if not image_stream:
         return "Failed to download image", 500
-        
-    # 3. Process image
-    raw_data = process_image_debug(image_stream)
+
+    # 3. Fetch weather forecast (None on failure → overlay is skipped)
+    weather_data = fetch_weather()
+
+    # 4. Process image
+    raw_data = process_image_debug(image_stream, weather_data=weather_data)
     if not raw_data:
         return "Failed to process image", 500
         
     # 4. Return raw binary bytes
+    response = make_response(raw_data)
+    response.headers.set('Content-Type', 'application/octet-stream')
+    response.headers.set('Content-Length', str(len(raw_data)))
+    return response
+
+@app.route('/get_weather_image', methods=['POST'])
+def get_weather_image():
+    # Full-page 2-day forecast. Weather/render failures are non-fatal: the
+    # device requires exactly 15000 bytes, so we always return a valid page
+    # (an "unavailable" one on failure) rather than a 500. Local time comes from
+    # the forecast's DST-aware offset, so no server timezone database is needed.
+    try:
+        data = fetch_weather_2day()
+        if data:
+            img = render_weather_page(data["slots"], local_now(data["offset_seconds"]))
+        else:
+            img = render_weather_page(None, local_now())
+    except Exception as e:
+        print(f"Error rendering weather page: {e}")
+        img = render_weather_page(None, local_now())
+    raw_data = pack_1bit(img)
+
     response = make_response(raw_data)
     response.headers.set('Content-Type', 'application/octet-stream')
     response.headers.set('Content-Length', str(len(raw_data)))
